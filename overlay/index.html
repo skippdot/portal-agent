@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fable Plays Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0d12; --panel: #10151d; --line: #1e2733; --text: #e6ebf2; --dim: #7d8898; --faint: #4a5566;
+    --blue: #4f8cff; --sky: #6fb6ff; --orange: #f08a24; --green: #5fe07a; --red: #ff4d4d;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace; --sans: Inter, -apple-system, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: var(--bg); overflow: hidden; color: var(--text); font-family: var(--sans); }
+  #stage { position: absolute; width: 1920px; height: 1080px; transform-origin: 0 0; display: grid;
+           grid-template-columns: 1000px 920px; }
+  .label { font: 600 15px var(--sans); letter-spacing: .18em; color: var(--dim); display: flex; align-items: center; gap: 10px; text-transform: uppercase; }
+  .label::before { content: ""; width: 12px; height: 12px; border: 3px solid var(--blue); border-radius: 50%; }
+  .ago { font: 400 13px var(--mono); color: var(--faint); margin-left: auto; letter-spacing: 0; text-transform: none; }
+
+  /* Left column */
+  #left { display: grid; grid-template-rows: 625px 455px; border-right: 1px solid var(--line); }
+  #game { position: relative; background: #000; overflow: hidden; }
+  #game img:not([src]), #agentview img:not([src]) { display: none; }
+  #game img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #game .nosignal { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font: 600 18px var(--mono); }
+  #bottom { display: grid; grid-template-columns: 350px 650px; }
+  #splits { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  #splitlist { flex: 1; overflow: hidden; }
+  .split { display: flex; justify-content: space-between; padding: 0 10px 0 8px; height: 30.5px; align-items: center;
+           font: 500 17px var(--mono); border-bottom: 1px solid #151b24; color: var(--text); }
+  .split .t { color: var(--dim); }
+  .split.done .t { color: var(--green); }
+  .split.current { background: linear-gradient(90deg, #2a5bd7, #2349b0); }
+  .split.current .t { color: #fff; }
+  #timer { font: 800 64px var(--mono); color: var(--green); text-align: center; padding: 6px 0 10px; letter-spacing: -.02em;
+           text-shadow: 0 0 18px rgba(95,224,122,.25); }
+  #timer small { font-size: 40px; }
+  #agentside { padding: 22px 30px 26px; display: grid; grid-template-rows: auto 1fr 110px; gap: 14px; min-height: 0; }
+  #agentview { position: relative; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #000; min-height: 0; }
+  #agentview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; }
+  .card .k { font: 600 13px var(--sans); letter-spacing: .16em; color: var(--dim); text-transform: uppercase; }
+  .card .v { font: 800 38px var(--mono); }
+  .card .s { font: 400 12px var(--mono); color: var(--faint); }
+  .card.status { border-color: var(--orange); background: rgba(240,138,36,.08); }
+  .card.status .v { color: var(--orange); font-size: 30px; letter-spacing: .06em; }
+  .card.status.acting { border-color: var(--blue); background: rgba(79,140,255,.08); }
+  .card.status.acting .v { color: var(--sky); }
+  .card.status.idle { border-color: var(--line); background: var(--panel); }
+  .card.status.idle .v { color: var(--dim); }
+
+  /* Right column */
+  #right { padding: 38px 32px 24px 32px; display: grid; grid-template-rows: auto auto 290px auto 1fr; gap: 22px; min-height: 0; }
+  #head { display: flex; justify-content: space-between; align-items: flex-start; }
+  h1 { font: 800 44px var(--sans); letter-spacing: .01em; line-height: 1; }
+  h1 span { color: var(--sky); }
+  .by { font: 600 13px var(--sans); letter-spacing: .2em; color: var(--dim); margin-top: 10px; text-transform: uppercase; }
+  #clock { font: 800 38px var(--mono); display: flex; align-items: center; gap: 12px; }
+  #clock::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--red); animation: blink 1.6s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  #stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; }
+  #stats .card { height: 96px; }
+  #stats .v { font-size: 34px; }
+  #trace { display: flex; flex-direction: column; gap: 0; min-height: 0; overflow: hidden; }
+  .tr { padding: 10px 14px; border-radius: 4px; }
+  .tr:first-of-type { background: #111a2a; }
+  .tr .when { font: 400 13px var(--mono); color: var(--faint); }
+  .tr .txt { font: 500 21px var(--sans); line-height: 1.3; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tr:nth-of-type(n+3) .txt { color: var(--dim); }
+  .tr:nth-of-type(n+4) { opacity: .55; }
+  #activity .bars { display: flex; align-items: flex-end; gap: 4px; height: 56px; margin-top: 12px; border-bottom: 2px dashed #202a37; }
+  #activity .bars i { flex: 1; background: var(--orange); opacity: .8; min-height: 0; }
+  #activity .bars i:last-child { background: var(--sky); opacity: 1; }
+  #actions { min-height: 0; overflow: hidden; }
+  .act { font: 400 15px/1.45 var(--mono); color: var(--text); margin-top: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-all; }
+  .act .a { color: var(--faint); }
+  .act .n { color: var(--orange); font-weight: 600; }
+  .act .r { color: var(--green); }
+  .act.err .r { color: var(--red); }
+  .act:nth-of-type(n+3) { opacity: .6; }
+  .act:nth-of-type(n+5) { opacity: .35; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <section id="left">
+    <div id="game"><div class="nosignal">waiting for game window…</div><img id="g1" alt=""><img id="g2" alt=""></div>
+    <div id="bottom">
+      <div id="splits"><div id="splitlist"></div><div id="timer">0:00<small>.00</small></div></div>
+      <div id="agentside">
+        <div class="label">Agent view <span class="ago" id="viewago"></span></div>
+        <div id="agentview"><img id="agentimg" alt=""></div>
+        <div id="cards">
+          <div class="card"><div class="k">Tool calls</div><div class="v" id="calls">0</div></div>
+          <div class="card"><div class="k">Est. API cost</div><div class="v" id="cost">$0.00</div></div>
+          <div class="card status" id="statuscard"><div class="k">Agent status</div><div class="v" id="status">IDLE</div><div class="s" id="statusago"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="right">
+    <div id="head">
+      <div><h1>FABLE 5.1 <span>PLAYS PORTAL</span></h1><div class="by">Anthropic · Claude Code</div></div>
+      <div id="clock">0:00</div>
+    </div>
+    <div>
+      <div class="label">Session stats</div>
+      <div id="stats">
+        <div class="card"><div class="k">Context</div><div class="v" id="ctx">0%</div><div class="s" id="ctxs"></div></div>
+        <div class="card"><div class="k">Input tokens</div><div class="v" id="in">0</div><div class="s">incl. cache</div></div>
+        <div class="card"><div class="k">Output tokens</div><div class="v" id="out">0</div><div class="s">generated</div></div>
+        <div class="card"><div class="k">Total tokens</div><div class="v" id="tot">0</div><div class="s">in + out</div></div>
+      </div>
+    </div>
+    <div id="trace"><div class="label" style="margin-bottom:8px">Agent trace</div><div id="tracelist"></div></div>
+    <div id="activity"><div class="label">Activity <span class="ago">last 45 min</span></div><div class="bars" id="bars"></div></div>
+    <div id="actions"><div class="label">Last actions <span class="ago" id="actago"></span></div><div id="actlist"></div></div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function fit() {
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  const st = $("stage");
+  st.style.transform = `scale(${s})`;
+  st.style.left = `${(innerWidth - 1920 * s) / 2}px`;
+  st.style.top = `${(innerHeight - 1080 * s) / 2}px`;
+}
+addEventListener("resize", fit); fit();
+
+function fmtTok(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2).replace(/\.?0+$/, "") + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(n);
+}
+function fmtClock(ms, withMs) {
+  const t = Math.max(0, ms) / 1000;
+  const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = Math.floor(t % 60);
+  const base = h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+  return withMs ? [base, "." + String(Math.floor(t * 100) % 100).padStart(2, "0")] : base;
+}
+function ago(at, now) {
+  if (!at) return "";
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+}
+
+let S = null, skew = 0, viewAt = null;
+
+async function poll() {
+  try {
+    const r = await fetch("/state.json", { cache: "no-store" });
+    S = await r.json();
+    skew = Date.now() - S.now;
+    render();
+  } catch {}
+  setTimeout(poll, 1000);
+}
+
+function render() {
+  const now = Date.now() - skew;
+  $("clock").textContent = S.startedAt ? fmtClock(now - S.startedAt) : "0:00";
+  const [tb, tf] = fmtClock(S.gameSeconds * 1000, true);
+  $("timer").innerHTML = `${tb}<small>${tf}</small>`;
+
+  const pct = S.context / S.contextWindow * 100;
+  $("ctx").textContent = (pct < 10 ? pct.toFixed(1) : Math.round(pct)) + "%";
+  $("ctxs").textContent = `${fmtTok(S.context)} / ${fmtTok(S.contextWindow)}`;
+  $("in").textContent = fmtTok(S.input);
+  $("out").textContent = fmtTok(S.output);
+  $("tot").textContent = fmtTok(S.input + S.output);
+  $("calls").textContent = S.toolCalls;
+  $("cost").textContent = "$" + S.cost.toFixed(2);
+
+  // No transcript activity for 5 minutes: the session is stopped, not thinking.
+  const status = S.lastEventAt && now - S.lastEventAt > 300000 ? "PAUSED" : S.status;
+  $("status").textContent = status;
+  $("statuscard").className = "card status " + (status === "PAUSED" ? "idle" : status.toLowerCase());
+  $("statusago").textContent = ago(S.lastEventAt, now);
+
+  $("tracelist").innerHTML = S.trace.map((t) =>
+    `<div class="tr"><div class="when">${ago(t.at, now)}</div><div class="txt">${esc(t.text)}</div></div>`).join("");
+
+  const max = Math.max(1, ...S.activity);
+  $("bars").innerHTML = S.activity.map((v) => `<i style="height:${v / max * 100}%"></i>`).join("");
+
+  $("actago").textContent = S.actions[0] ? ago(S.actions[0].at, now) : "";
+  $("actlist").innerHTML = S.actions.map((a) =>
+    `<div class="act${a.result.startsWith("error") ? " err" : ""}"><span class="a">${ago(a.at, now)}</span> <span class="n">portal exec</span> ${esc(a.code.replace(/\s+/g, " "))} <span class="r">→ ${esc(a.result)}</span></div>`).join("");
+
+  $("splitlist").innerHTML = S.splits.map((s) =>
+    `<div class="split${s.done ? " done" : ""}${s.current ? " current" : ""}"><span>${s.label}</span><span class="t">${s.splitAt != null ? fmtClock(s.splitAt) : "-"}</span></div>`).join("");
+  // Keep the current chamber in view once the run passes the visible rows.
+  const cur = document.querySelector(".split.current");
+  if (cur) $("splitlist").scrollTop = Math.max(0, cur.offsetTop - $("splitlist").offsetTop - 5 * 30.5);
+
+  $("viewago").textContent = ago(S.agentViewAt, now);
+  if (S.agentViewAt && S.agentViewAt !== viewAt) {
+    viewAt = S.agentViewAt;
+    $("agentimg").src = "/agent.jpg?" + viewAt;
+  }
+}
+
+// Live game feed: double-buffered so frames never flash.
+let front = $("g1"), back = $("g2");
+function nextFrame() {
+  const started = performance.now();
+  back.onload = () => {
+    back.style.zIndex = 2; front.style.zIndex = 1;
+    [front, back] = [back, front];
+    document.querySelector(".nosignal").style.display = "none";
+    setTimeout(nextFrame, Math.max(0, 200 - (performance.now() - started)));
+  };
+  back.onerror = () => setTimeout(nextFrame, 1000);
+  back.src = "/game.jpg?" + Date.now();
+}
+setInterval(() => S && render(), 1000);
+poll();
+nextFrame();
+</script>
+</body>
+</html>
