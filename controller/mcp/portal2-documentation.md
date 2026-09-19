@@ -16,7 +16,25 @@ interface PortalController {
   seconds(value: number): number;          // Positive finite seconds -> nearest tick (60/s, minimum 1).
   abort(): Promise<void>;                  // Stop an active tas_run; rejects if none is active.
   screenshot(options?: ScreenshotOptions): Promise<ScreenshotResult>;
+  scene(): Promise<Scene>;                 // what the vision daemon sees right now
+  rewind(secondsAgo: number, options?: RewindOptions): Promise<RewindResult>;
+  heard(): Promise<string[]>;              // speech recognized since the last call
+  save(name: string): Promise<{ saved: string }>;
+  load(name: string): Promise<{ loaded: string; facing?: Facing; position: Position }>;
 }
+
+type Scene = {
+  t: number;                               // epoch seconds of the analyzed frame
+  fan: Record<"left" | "left_center" | "center" | "right_center" | "right", number>;
+  blocked: string[];                       // directions with a surface right there
+  floor: number;                           // how close the ground ahead is
+  summary: string;                         // e.g. "left near, center clear, right blocked"
+  objects?: string[];                      // when the object model is enabled
+  change: number;                          // how much the frame changed (0 = static)
+};
+
+type RewindOptions = { width?: number; height?: number; autoEmit?: boolean };
+type RewindResult = { url: string; width: number; height: number; at: number };
 
 interface TasBuilder {
   steps: WireTasStep[];                    // Normalized steps queued so far (wire shape).
@@ -86,6 +104,8 @@ type TasRunResult = {
   unavailable?: Partial<Record<ObservationField, string>>;
   screenshots?: Array<PortalScreenshot>;   // present unless { screenshot: false }
   heard?: string[];                        // Portal 2: lines spoken during the plan (speech recognition)
+  scene?: Scene;                           // what perception sees now
+  sceneEvents?: Scene[];                   // scene changes during playback
   moved?: number;                          // distance the player actually travelled
 };
 
@@ -143,6 +163,15 @@ type PortalScreenshot = {
   wall and facing an open doorway produce the same `position`.
 - Keep a rough obstacle map in notes.md: landmark coordinates, doorways, and
   the spots where you got stuck.
+- **`scene` comes with every run.** The fan is inverse depth: about 1.0 means a
+  surface right in front of you, below ~0.35 is open space. `blocked` lists the
+  directions you cannot walk into. Trust it over guessing from the picture.
+- **`rewind(seconds)`** returns the frame the window showed that many seconds
+  ago - useful to re-read a subtitle you missed or to see what a door looked
+  like before you opened it. It does not move the game back; `load()` does.
+- The run folder gets a `journal.jsonl` written by the controller: every
+  snippet, its result, what was heard and the scene summary. Read it after a
+  break instead of guessing what you already tried.
 - Spoken dialogue during a plan comes back as `heard`: the game's audio is
   transcribed by speech recognition. It often contains instructions, so read
   it. Closed captions are also drawn on screen, so screenshots show recent

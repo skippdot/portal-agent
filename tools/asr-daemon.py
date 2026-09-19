@@ -97,6 +97,11 @@ def make_gigaam():
     def transcribe(audio):
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
             sf.write(tmp.name, audio, RATE)
+            if len(audio) / RATE > 20:
+                # GigaAM's plain transcribe() rejects long files.
+                parts = model.transcribe_longform(tmp.name)
+                return " ".join(str(getattr(p, "text", p.get("transcription", "") if isinstance(p, dict) else p)).strip()
+                                for p in parts).strip()
             result = model.transcribe(tmp.name)
             # GigaAM v3 returns a TranscriptionResult; older versions a string.
             return str(getattr(result, "text", result)).strip()
@@ -193,9 +198,9 @@ if is_speech is None:
     is_speech = spectral_is_speech
 
 START_FRAMES = 4    # ~128 ms of speech starts an utterance
-END_FRAMES = 24     # ~770 ms of silence ends it
+END_FRAMES = 18     # ~580 ms of silence ends it (keeps lines separate)
 PAD_FRAMES = 10     # keep ~320 ms before the start
-MAX_SECONDS = 25
+MAX_SECONDS = 20    # GigaAM's single-shot limit; longer goes to longform
 
 ring = []
 utter = None

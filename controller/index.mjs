@@ -1,5 +1,7 @@
 import net from "node:net";
 
+import { ScenePerception } from "./perception.mjs";
+
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 27182;
 const DEFAULT_CONNECT_TIMEOUT_MS = 1500;
@@ -576,11 +578,15 @@ export class PortalController {
   #client;
 
   #ticksPerSecond;
+  #perception;
 
   constructor(client, options = {}) {
     this.#client = client;
     this.#ticksPerSecond = options.ticksPerSecond ?? TICKS_PER_SECOND;
     this.look = createLookApi(client);
+    this.#perception = new ScenePerception({ host: client.host, port: client.capturePort });
+    // The client reports what the plan changed; perception is read alongside.
+    client.perception = this.#perception;
   }
 
   // Start building a TAS plan while the game stays frozen.
@@ -593,6 +599,15 @@ export class PortalController {
   // the result.
   async run(steps, options = {}) {
     const result = await this.#client.tasRun(steps, options);
+    if (options.scene ?? true) {
+      try {
+        const { scene, events } = await this.#perception.poll();
+        if (scene) result.scene = scene;
+        if (events.length) result.sceneEvents = events;
+      } catch {
+        // Perception is optional: a missing vision daemon must not fail a plan.
+      }
+    }
     if (options.screenshot ?? true) {
       const shot = await this.#client.screenshot(options);
       result.screenshots = shot.screenshots;
@@ -636,6 +651,22 @@ export class PortalController {
 
   screenshot(options) {
     return this.#client.screenshot(options);
+  }
+
+  // What the vision daemon currently sees: a five-direction "how close is the
+  // nearest surface" fan, the floor ahead, and (when enabled) named objects.
+  async scene() {
+    const { scene } = await this.#perception.poll();
+    if (!scene) throw new Error("No scene available: is tools/vision-daemon.py running?");
+    return scene;
+  }
+
+  // A frame of what the window showed `secondsAgo` seconds ago.
+  async rewind(secondsAgo, options = {}) {
+    const frame = await this.#perception.frameAt(secondsAgo, options);
+    const url = toDataUrl(frame.bytes, "image/jpeg");
+    if (options.autoEmit ?? true) await emitImage(url);
+    return { url, width: frame.width, height: frame.height, at: frame.at };
   }
 
   // Backend-specific extras (Portal 2): saves and recognized speech.

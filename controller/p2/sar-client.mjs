@@ -36,8 +36,11 @@ const EYE_MESSAGE_RE = /eye:\s*(\S+)\s+(\S+)\s+(\S+)\s*angles:\s*(\S+)\s+(\S+)\s
 // Console commands run on every plan's first tick: keep the physical mouse
 // from nudging the view and keep closed captions on screen (the agent reads
 // them from screenshots; game files are never read).
-const PLAN_PREFIX_COMMANDS = ["cl_mouseenable 0", "closecaption 1", "cc_subtitles 0"].join(";");
-const REPORT_COMMANDS = 'svar_capture __agent_eye sar_geteyepos;sar_expand sar_tas_protocol_send_msg "$__agent_eye"';
+// host_timescale is the freeze that survives everything: a stopped script, a
+// map change, a reload. The plan turns time back on, the report bulk at the
+// end turns it off again, so the world is frozen whenever the agent thinks.
+const PLAN_PREFIX_COMMANDS = ["cl_mouseenable 0", "closecaption 1", "cc_subtitles 0", "host_timescale 1"].join(";");
+const REPORT_COMMANDS = 'host_timescale 0;svar_capture __agent_eye sar_geteyepos;sar_expand sar_tas_protocol_send_msg "$__agent_eye"';
 
 const round2 = (v) => Math.round(v * 100) / 100;
 const fmt = (v) => String(Math.round(v * 1000) / 1000);
@@ -127,6 +130,10 @@ export class SarTasClient {
     this.busy = false;
     this.planCount = 0;
     this.heardOffset = null;    // cursor into the speech-recognition transcript
+    // Portal 2 throttles itself when unfocused (12 vs 34 ticks/s measured), so
+    // the game is brought to the front before playing, unless disabled.
+    this.focusGame = options.focusGame ?? true;
+    this.lastFocus = 0;
   }
 
   // Speech recognition of the game audio (tools/asr-daemon.py), served by the
@@ -347,8 +354,22 @@ export class SarTasClient {
 
   // Plays steps as one script and resolves once SAR has paused after the plan
   // and reported the eye angles.
+  async #focus() {
+    if (!this.focusGame || !this.capturePort || Date.now() - this.lastFocus < 5000) return;
+    this.lastFocus = Date.now();
+    await new Promise((resolve) => {
+      const socket = net.createConnection({ host: this.host, port: this.capturePort });
+      const done = () => { socket.destroy(); resolve(); };
+      socket.setTimeout(3000, done);
+      socket.on("connect", () => socket.write("FOCUS\n"));
+      socket.on("data", done);
+      socket.on("error", done);
+    });
+  }
+
   async #play(steps, timeoutMs, start = "now") {
     if (this.busy) throw new Error("Another TAS plan is still running.");
+    await this.#focus();
     this.busy = true;
     try {
       const { script, endTick } = compileP2Script(steps, PLAN_PREFIX_COMMANDS, start);

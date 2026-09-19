@@ -194,6 +194,7 @@ const KEEP_ENV = new Set([
   "PORTAL_SPT_PORT",
   "PORTAL_CAPTURE_PORT",
   "PORTAL_BACKEND",
+  "PORTAL_JOURNAL",
   "SystemRoot",
   "windir",
   "TEMP",

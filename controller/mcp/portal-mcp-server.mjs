@@ -23,6 +23,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createPortalController, PortalController } from "../index.mjs";
 import { SarTasClient, P2_TICKS_PER_SECOND } from "../p2/sar-client.mjs";
+import { Journal } from "./journal.mjs";
 
 const SERVER_NAME = "portal";
 const SERVER_VERSION = "0.1.0";
@@ -33,6 +34,9 @@ const SPT_OPTIONS = {
   port: process.env.PORTAL_SPT_PORT ? Number(process.env.PORTAL_SPT_PORT) : 27182,
   capturePort: process.env.PORTAL_CAPTURE_PORT ? Number(process.env.PORTAL_CAPTURE_PORT) : null,
 };
+
+// What actually happened, written next to the agent's own notes.
+const journal = new Journal(process.env.PORTAL_JOURNAL ?? "journal.jsonl");
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const DATA_IMAGE_URL_RE = /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi;
@@ -129,7 +133,14 @@ async function runExec({ code }) {
   capturedImages = [];
 
   const fn = new AsyncFunction("portal", `"use strict";\n${code}`);
-  const value = await fn(portal);
+  let value;
+  try {
+    value = await fn(portal);
+  } catch (error) {
+    journal.error(code, error?.message ?? error);
+    throw error;
+  }
+  journal.exec(code, value);
 
   const content = [];
   const imageUrls = capturedImages.slice();
