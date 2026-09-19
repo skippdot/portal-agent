@@ -18,6 +18,10 @@ jobs:
         shell: pwsh
         run: ./tools/prepare-spt.ps1
 
+      - name: Apply macOS/CrossOver patch
+        shell: pwsh
+        run: git -C .local/SourcePauseTool apply --whitespace=nowarn ../../spt/macos-crossover.patch
+
       - name: Build spt (Source Unpack / build 5135)
         shell: pwsh
         run: ./tools/build-spt.ps1 -Target spt

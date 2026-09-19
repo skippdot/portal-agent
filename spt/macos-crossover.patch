@@ -1,0 +1,100 @@
+diff --git a/spt/features/ipc-spt.cpp b/spt/features/ipc-spt.cpp
+index 400b111..a4edf6a 100644
+--- a/spt/features/ipc-spt.cpp
++++ b/spt/features/ipc-spt.cpp
+@@ -222,6 +222,20 @@ namespace ipc
+ #endif
+ 	ConVar y_spt_ipc("y_spt_ipc", "0", 0, "Enables IPC.", IPC_Changed);
+ 	ConVar y_spt_ipc_port("y_spt_ipc_port", "27182", 0, "Port used for IPC.");
++	ConVar spt_agent_ready_debug("spt_agent_ready_debug",
++	                             "0",
++	                             0,
++	                             "Prints why start_run has not reached the ready state yet.");
++
++	static const char* lastReadyWaitReason = nullptr;
++	static void ReportReadyWait(const char* reason)
++	{
++		if (reason == lastReadyWaitReason)
++			return;
++		lastReadyWaitReason = reason;
++		if (reason && spt_agent_ready_debug.GetBool())
++			Msg("spt_agent_ready: waiting: %s\n", reason);
++	}
+ 	ConVar y_spt_ipc_expose_position("y_spt_ipc_expose_position",
+ 	                                 "0",
+ 	                                 0,
+@@ -1115,6 +1129,10 @@ namespace ipc
+ 		RestoreTasMouse();
+ 		if (agentRunBootstrap)
+ 		{
++			if (spt_agent_ready_debug.GetBool())
++				Msg("spt_agent_ready: bootstrap finished: simulated=%lld requested=%lld\n",
++				    tasPlayback.ticksExecuted,
++				    tasPlayback.requestedTicks);
+ 			tasPlayback = TasPlayback();
+ 			if (exactTicks)
+ 				FinishAgentRunReady();
+@@ -1318,12 +1336,28 @@ namespace ipc
+ 
+ 	void AdvanceAgentRunReadyState()
+ 	{
+-		if (!agentRun.active || !agentRun.waitingForLoad || !agentRun.readyTransitionPending)
++		if (!agentRun.active || !agentRun.waitingForLoad)
+ 			return;
++		// On some builds (e.g. Steam/SteamPipe under Wine) neither SV_ActivateServer
++		// nor FinishRestore reports the new-game load. The bed-start detector firing
++		// is itself proof the map is loaded, so accept it as the transition trigger.
++		if (!agentRun.readyTransitionPending && !agentRun.initialPortalStartReached
++		    && SptPortalStartPauseHasFired())
++		{
++			if (spt_agent_ready_debug.GetBool())
++				Msg("spt_agent_ready: bed start fired without a load signal; continuing.\n");
++			agentRun.readyTransitionPending = true;
++		}
++		if (!agentRun.readyTransitionPending)
++		{
++			ReportReadyWait("no load signal (SV_ActivateServer/FinishRestore) yet");
++			return;
++		}
+ 
+ 		Vector position;
+ 		if (!utils::spt_clientEntList.GetPlayer() || !TryGetPlayerPosition(position))
+ 		{
++			ReportReadyWait("player entity/position unavailable");
+ 			agentRun.postSignonTicks = 0;
+ 			return;
+ 		}
+@@ -1334,7 +1368,10 @@ namespace ipc
+ 			// a player entity happen while "Loading..." is still visible, so wait for
+ 			// the dedicated Portal-start detector to observe the real bed handoff.
+ 			if (!SptPortalStartPauseHasFired())
++			{
++				ReportReadyWait("bed-start detector has not fired");
+ 				return;
++			}
+ 		}
+ 		else
+ 		{
+@@ -1346,7 +1383,14 @@ namespace ipc
+ 				return;
+ 		}
+ 		if (agentRun.bootstrapStarted || tasPlayback.active)
++		{
++			ReportReadyWait("bootstrap TAS tick is playing");
+ 			return;
++		}
++
++		ReportReadyWait(nullptr);
++		if (spt_agent_ready_debug.GetBool())
++			Msg("spt_agent_ready: queueing bootstrap TAS tick.\n");
+ 
+ 		// Bootstrap the same native SourceTAS/afterframes path used by every agent
+ 		// action. Besides establishing the correct TAS phase, these neutral ticks
+@@ -1998,6 +2042,7 @@ void ipc::IPCFeature::LoadFeature()
+ 
+ 		InitConcommandBase(y_spt_ipc);
+ 		InitConcommandBase(y_spt_ipc_port);
++		InitConcommandBase(spt_agent_ready_debug);
+ 		InitConcommandBase(y_spt_ipc_expose_position);
+ 	}
+ }
