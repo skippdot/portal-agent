@@ -58,6 +58,8 @@ default_tools_approval_mode = "approve"
 [mcp_servers.portal.env]
 PORTAL_SPT_HOST = "127.0.0.1"
 PORTAL_SPT_PORT = "27182"
+# macOS/CrossOver only: window-capture sidecar (tools/mac-capture-daemon.py).
+# PORTAL_CAPTURE_PORT = "27183"
 
 [permissions.portal-run]
 extends = ":workspace"

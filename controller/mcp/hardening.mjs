@@ -27,6 +27,9 @@ import dgram from "node:dgram";
 
 const SPT_HOST = process.env.PORTAL_SPT_HOST || "127.0.0.1";
 const SPT_PORT = process.env.PORTAL_SPT_PORT ? Number(process.env.PORTAL_SPT_PORT) : 27182;
+// Optional macOS window-capture sidecar on the same loopback host.
+const CAPTURE_PORT = process.env.PORTAL_CAPTURE_PORT ? Number(process.env.PORTAL_CAPTURE_PORT) : null;
+const ALLOWED_PORTS = new Set(CAPTURE_PORT ? [SPT_PORT, CAPTURE_PORT] : [SPT_PORT]);
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"]);
 // Hostname aliases are accepted only when the configured host is itself
@@ -84,7 +87,7 @@ function assertAllowed(args) {
   if (target.kind !== "tcp") {
     throw new NetworkBlockedError(target.detail);
   }
-  if (target.port !== SPT_PORT || !ALLOWED_HOSTS.has(String(target.host))) {
+  if (!ALLOWED_PORTS.has(target.port) || !ALLOWED_HOSTS.has(String(target.host))) {
     throw new NetworkBlockedError(`connect to ${target.host}:${target.port}`);
   }
 }
@@ -189,6 +192,7 @@ delete process._linkedBinding;
 const KEEP_ENV = new Set([
   "PORTAL_SPT_HOST",
   "PORTAL_SPT_PORT",
+  "PORTAL_CAPTURE_PORT",
   "SystemRoot",
   "windir",
   "TEMP",

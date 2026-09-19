@@ -30,6 +30,7 @@ const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 const SPT_OPTIONS = {
   host: process.env.PORTAL_SPT_HOST || "127.0.0.1",
   port: process.env.PORTAL_SPT_PORT ? Number(process.env.PORTAL_SPT_PORT) : 27182,
+  capturePort: process.env.PORTAL_CAPTURE_PORT ? Number(process.env.PORTAL_CAPTURE_PORT) : null,
 };
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;

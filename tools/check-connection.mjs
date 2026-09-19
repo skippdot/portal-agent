@@ -21,7 +21,7 @@ const controller = path.join(root, 'controller');
 const child = spawn(process.execPath, [
   '--permission', `--allow-fs-read=${controller}`, `--allow-fs-write=${run}`,
   path.join(controller, 'mcp/portal-mcp-server.mjs'),
-], {cwd: run, env: {...process.env, PORTAL_SPT_HOST: '127.0.0.1', PORTAL_SPT_PORT: '27182'}, stdio: ['pipe', 'pipe', 'pipe']});
+], {cwd: run, env: {...process.env, PORTAL_SPT_HOST: '127.0.0.1', PORTAL_SPT_PORT: '27182', PORTAL_CAPTURE_PORT: process.env.PORTAL_CAPTURE_PORT ?? ''}, stdio: ['pipe', 'pipe', 'pipe']});
 let buffer = '', stderr = '', nextId = 0, exited = false;
 const pending = new Map();
 function failAll(error) {

@@ -35,6 +35,10 @@ class SptCommandClient {
   constructor(options = {}) {
     this.host = options.host ?? DEFAULT_HOST;
     this.port = options.port ?? DEFAULT_PORT;
+    // Optional macOS window-capture sidecar (tools/mac-capture-daemon.py). Under
+    // CrossOver/Wine SPT's ReadPixels returns black frames, so SPT is used only
+    // to sync to a rendered frame and the pixels come from the sidecar.
+    this.capturePort = options.capturePort ?? null;
     this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
@@ -326,6 +330,18 @@ class SptCommandClient {
         },
       },
     );
+
+    if (this.capturePort) {
+      const target = options.fullRes === true
+        ? { width: state.begin.width, height: state.begin.height }
+        : fit360p(state.begin.width, state.begin.height);
+      const captured = await captureFromSidecar(this.host, this.capturePort, state.begin, target);
+      result.screenshots = [{
+        height: captured.height,
+        url: toDataUrl(captured.bytes, "image/jpeg"),
+        width: captured.width,
+      }];
+    }
 
     // Internal harness control: agent-facing documentation intentionally omits
     // this option. RunOptions.screenshot controls whether capture happens.
@@ -989,6 +1005,39 @@ function normalizeOptionalStride(value) {
     throw new Error(`RGB screenshot response included an invalid stride: ${value}.`);
   }
   return value;
+}
+
+function captureFromSidecar(host, port, source, target) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host, port });
+    const chunks = [];
+    const timer = setTimeout(() => socket.destroy(new Error("Window capture sidecar timed out.")), 15000);
+    socket.on("connect", () => {
+      socket.write(`${source.width} ${source.height} ${target.width} ${target.height}\n`);
+    });
+    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(new Error(`Window capture sidecar unavailable on ${host}:${port}: ${error.message}`));
+    });
+    socket.on("end", () => {
+      clearTimeout(timer);
+      const data = Buffer.concat(chunks);
+      const newline = data.indexOf(0x0a);
+      const header = data.subarray(0, newline).toString("utf8").split(" ");
+      if (header[0] !== "OK") {
+        reject(new Error(`Window capture failed: ${header.slice(1).join(" ") || "empty response"}`));
+        return;
+      }
+      const [length, width, height] = header.slice(1).map(Number);
+      const bytes = data.subarray(newline + 1);
+      if (bytes.length !== length) {
+        reject(new Error(`Window capture truncated: expected ${length} bytes, got ${bytes.length}.`));
+        return;
+      }
+      resolve({ bytes, height, width });
+    });
+  });
 }
 
 function toDataUrl(bytes, mimeType) {
