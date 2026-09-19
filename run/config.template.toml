@@ -44,7 +44,7 @@ args = [
   '--permission',
   '--allow-fs-read=__CONTROLLER_DIR__',
   '--allow-fs-write=__RUN_DIR__',
-  '__CONTROLLER_DIR__\mcp\portal-mcp-server.mjs',
+  '__CONTROLLER_DIR__/mcp/portal-mcp-server.mjs',
 ]
 startup_timeout_sec = 60
 tool_timeout_sec = 180 # A maximum-length 6,600-tick plan takes about 99 seconds.
