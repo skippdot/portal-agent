@@ -21,7 +21,8 @@ import "./hardening.mjs";
 import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { createPortalController } from "../index.mjs";
+import { createPortalController, PortalController } from "../index.mjs";
+import { SarTasClient, P2_TICKS_PER_SECOND } from "../p2/sar-client.mjs";
 
 const SERVER_NAME = "portal";
 const SERVER_VERSION = "0.1.0";
@@ -36,10 +37,23 @@ const SPT_OPTIONS = {
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const DATA_IMAGE_URL_RE = /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi;
 const EXACT_DATA_IMAGE_URL_RE = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i;
+// PORTAL_BACKEND=sar drives Portal 2 through SourceAutoRecord's TAS protocol
+// (controller/p2) instead of the patched SPT used for Portal.
+const BACKEND = process.env.PORTAL_BACKEND === "sar" ? "sar" : "spt";
+const GAME = BACKEND === "sar" ? "Portal 2" : "Portal";
 const PORTAL_DOCUMENTATION = readFileSync(
-  new URL("./portal-documentation.md", import.meta.url),
+  new URL(BACKEND === "sar" ? "./portal2-documentation.md" : "./portal-documentation.md", import.meta.url),
   "utf8",
 );
+
+async function createController() {
+  if (BACKEND === "sar") {
+    const client = new SarTasClient(SPT_OPTIONS);
+    await client.connect();
+    return new PortalController(client, { ticksPerSecond: P2_TICKS_PER_SECOND });
+  }
+  return createPortalController({ spt: SPT_OPTIONS });
+}
 
 // --- Persistent controller -------------------------------------------------
 
@@ -51,7 +65,7 @@ async function getPortal() {
     return controller;
   }
   if (!connecting) {
-    connecting = createPortalController({ spt: SPT_OPTIONS })
+    connecting = createController()
       .then((created) => {
         controller = created;
         connecting = null;
@@ -274,9 +288,9 @@ const TOOLS = [
   {
     name: "portal_exec",
     description:
-      "Run async JavaScript against Portal through SPT; `portal` is in scope. Use `return <value>` " +
+      `Run async JavaScript against ${GAME}; \`portal\` is in scope. Use \`return <value>\` ` +
       "for text results. Screenshots are returned as images.\n" +
-      "TAS: `const t = portal.tas()`, queue inputs, then `await t.run(options)` (~67 ticks/s). " +
+      `TAS: \`const t = portal.tas()\`, queue inputs, then \`await t.run(options)\` (~${BACKEND === "sar" ? 60 : 67} ticks/s). ` +
       "`t.hold(ticks, keys, angles?)` holds the exact key set; keys are forward, back, left, right, " +
       "jump, duck, use, attack, attack2 (aliases: crouch, blue, orange). Helpers: wait, tap, jump, " +
       "use, fire, and look. Angles use relative up/down/left/right or absolute pitchTo/yawTo.\n" +
@@ -306,7 +320,7 @@ const TOOLS = [
   {
     name: "portal_screenshot",
     description:
-      "Capture a full-resolution screenshot of Portal through SPT. By default it is returned as " +
+      `Capture a full-resolution screenshot of ${GAME}. By default it is returned as ` +
       "an image. Pass `savePath` to save the JPEG to that file instead, without returning the " +
       "image to the agent. ",
     inputSchema: {

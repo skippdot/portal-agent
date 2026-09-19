@@ -9,6 +9,12 @@ It runs outside the MCP sandbox (it needs child processes and Screen
 Recording permission), so the sandboxed broker only gets a loopback socket to
 it, never a way to spawn processes.
 
+It also serves what the agent heard, from tools/asr-daemon.py's transcript
+(speech recognition of the game audio; no game files are read):
+  request:  "HEARD <offset>\n"  (byte offset into the transcript JSONL)
+  response: "HEARD <new_offset> <state> <len>\n" + JSON array of
+            {"start","end","text"}; state is speaking/transcribing/idle.
+
 Protocol (one request per connection, 127.0.0.1 only):
   request:  "<src_w> <src_h> <target_w> <target_h>\n"
             src_* is the SPT backbuffer size (used for the client-area aspect),
@@ -28,18 +34,44 @@ from PIL import Image
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORTAL_CAPTURE_PORT", "27183"))
 WINDOW_TITLE = os.environ.get("PORTAL_WINDOW_TITLE", "Portal - Direct3D 9")
+WINDOW_OWNER = os.environ.get("PORTAL_WINDOW_OWNER", "hl2.exe")
 JPEG_QUALITY = 85
+HEARD_FILE = os.environ.get("PORTAL_HEARD_FILE")
+
+
+def heard_since(offset):
+    if not HEARD_FILE:
+        return offset, "off", []
+    try:
+        with open(HEARD_FILE + ".state") as f:
+            state = f.read().split()[0]
+    except (OSError, IndexError):
+        state = "off"
+    try:
+        size = os.path.getsize(HEARD_FILE)
+    except OSError:
+        return 0, state, []
+    if offset > size:
+        offset = 0
+    with open(HEARD_FILE, "rb") as f:
+        f.seek(offset)
+        chunk = f.read(size - offset)
+    # Only hand out complete lines.
+    end = chunk.rfind(b"\n") + 1
+    lines = [json.loads(l) for l in chunk[:end].decode("utf-8").splitlines() if l.strip()]
+    return offset + end, state, lines
 
 FIND_WINDOW_JXA = r"""
 ObjC.import("CoreGraphics");
 const title = %s;
+const wantOwner = %s;
 const list = ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionAll, 0)).js;
 let found = null;
 for (const w of list) {
   const d = w.js;
   const name = d.kCGWindowName ? d.kCGWindowName.js : "";
   const owner = d.kCGWindowOwnerName ? d.kCGWindowOwnerName.js : "";
-  if (name === title && owner === "hl2.exe") { found = d.kCGWindowNumber.js; break; }
+  if (name === title && owner === wantOwner) { found = d.kCGWindowNumber.js; break; }
 }
 JSON.stringify(found);
 """
@@ -49,7 +81,7 @@ _window_id = None
 
 def find_window_id():
     out = subprocess.run(
-        ["osascript", "-l", "JavaScript", "-e", FIND_WINDOW_JXA % json.dumps(WINDOW_TITLE)],
+        ["osascript", "-l", "JavaScript", "-e", FIND_WINDOW_JXA % (json.dumps(WINDOW_TITLE), json.dumps(WINDOW_OWNER))],
         capture_output=True, text=True, timeout=10,
     )
     wid = json.loads(out.stdout.strip() or "null")
@@ -95,6 +127,11 @@ class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         try:
             parts = self.rfile.readline(256).decode("ascii").split()
+            if parts and parts[0] == "HEARD":
+                new_offset, state, lines = heard_since(int(parts[1]))
+                body = json.dumps(lines, ensure_ascii=False).encode("utf-8")
+                self.wfile.write(f"HEARD {new_offset} {state} {len(body)}\n".encode("ascii") + body)
+                return
             src_w, src_h, target_w, target_h = (int(p) for p in parts)
             if min(src_w, src_h, target_w, target_h) <= 0 or max(target_w, target_h) > 8192:
                 raise ValueError("bad dimensions")

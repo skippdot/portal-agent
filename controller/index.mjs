@@ -575,8 +575,11 @@ class TasBuilder {
 export class PortalController {
   #client;
 
-  constructor(client) {
+  #ticksPerSecond;
+
+  constructor(client, options = {}) {
     this.#client = client;
+    this.#ticksPerSecond = options.ticksPerSecond ?? TICKS_PER_SECOND;
     this.look = createLookApi(client);
   }
 
@@ -603,7 +606,7 @@ export class PortalController {
     if (!Number.isFinite(seconds) || seconds <= 0) {
       throw new Error(`Expected a positive number of seconds, got ${value}.`);
     }
-    return Math.max(1, Math.round(seconds * TICKS_PER_SECOND));
+    return Math.max(1, Math.round(seconds * this.#ticksPerSecond));
   }
 
   // Stop an in-flight tas_run early; SPT releases all keys and re-pauses.
@@ -633,6 +636,22 @@ export class PortalController {
 
   screenshot(options) {
     return this.#client.screenshot(options);
+  }
+
+  // Backend-specific extras (Portal 2): saves and recognized speech.
+  save(name) {
+    if (!this.#client.saveGame) throw new Error("Saves are not supported for this game.");
+    return this.#client.saveGame(name);
+  }
+
+  load(name) {
+    if (!this.#client.loadGame) throw new Error("Saves are not supported for this game.");
+    return this.#client.loadGame(name);
+  }
+
+  heard() {
+    if (!this.#client.heard) throw new Error("Speech recognition is not available for this game.");
+    return this.#client.heard();
   }
 
   close() {
@@ -1415,3 +1434,6 @@ function coefficientBits(value, category) {
   }
   return { length: category, value: value + (1 << category) - 1 };
 }
+
+// Shared with other game backends (controller/p2 for Portal 2 via SAR).
+export { normalizeTasSteps, captureFromSidecar, fit360p, toDataUrl, emitImage, anglesToFacing, normalizePosition };
