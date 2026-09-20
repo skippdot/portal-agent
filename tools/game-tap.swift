@@ -30,6 +30,9 @@ var wantAudio = true
 // The captured window includes its title bar; drop it so frames are pure game.
 var cropTop = 28.0
 var audioRawPath: String? = nil
+// Any window can be captured, not just the game: --app "Google Chrome"
+// --window-title "Fable Plays" records the overlay UI itself.
+var windowTitle: String? = nil
 let sampleRate = 16000
 
 var it = CommandLine.arguments.dropFirst().makeIterator()
@@ -43,6 +46,7 @@ while let arg = it.next() {
     case "--no-audio": wantAudio = false
     case "--crop-top": cropTop = Double(it.next() ?? "") ?? cropTop
     case "--audio-raw": audioRawPath = it.next()
+    case "--window-title": windowTitle = it.next()
     default: FileHandle.standardError.write("unknown argument: \(arg)\n".data(using: .utf8)!)
     }
 }
@@ -237,13 +241,15 @@ Task {
             exit(1)
         }
         // Prefer the game's own window so the capture is not the whole display.
+        let wanted = windowTitle ?? "Direct3D"
         let window = content.windows.first {
-            $0.owningApplication?.processID == app.processID && ($0.title?.contains("Direct3D") ?? false)
+            $0.owningApplication?.processID == app.processID && ($0.title?.contains(wanted) ?? false)
         }
         let filter: SCContentFilter
         var width = 960, height = 600
         var sourceRect: CGRect? = nil
         if let window {
+            log("window: \(window.title ?? "-") \(Int(window.frame.width))x\(Int(window.frame.height))")
             filter = SCContentFilter(desktopIndependentWindow: window)
             let w = window.frame.width, h = window.frame.height - cropTop
             sourceRect = CGRect(x: 0, y: cropTop, width: w, height: h)
