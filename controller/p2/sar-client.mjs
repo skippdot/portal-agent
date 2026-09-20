@@ -439,6 +439,20 @@ export class SarTasClient {
     return { saved: name };
   }
 
+  // Start a map from the menu (or from anywhere): SAR loads it, then the
+  // plan's first ticks freeze the world for the agent.
+  async startMap(name) {
+    if (!/^[A-Za-z0-9_]{1,64}$/.test(String(name ?? ""))) {
+      throw new Error("Map names use letters, digits and underscores.");
+    }
+    if (this.heardOffset === null) await this.heard(0).catch(() => {});
+    await this.#play([{ ticks: 2 }], 240000, `map ${name}`);
+    this.heardOffset = null;
+    await this.heard(0).catch(() => {});
+    const e = await this.#entity();
+    return { map: name, position: { x: round2(e.position.x), y: round2(e.position.y), z: round2(e.position.z) } };
+  }
+
   // Load a save made with saveGame and freeze on its first ticks.
   async loadGame(name) {
     const file = SarTasClient.saveName(name);
@@ -512,7 +526,18 @@ export class SarTasClient {
     // the aspect used to crop the title bar (Portal 2 windowed default 16:10).
     const source = { width: options.sourceWidth ?? 960, height: options.sourceHeight ?? 600 };
     const target = options.fullRes === true ? source : fit360p(source.width, source.height);
-    const captured = await captureFromSidecar(this.host, this.capturePort, source, target);
+    // A screenshot failing must not end a run: the capture stream restarts
+    // itself when the game window is recreated, which takes a few seconds.
+    let captured;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        captured = await captureFromSidecar(this.host, this.capturePort, source, target);
+        break;
+      } catch (error) {
+        if (attempt >= 4) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      }
+    }
     const result = {
       screenshots: [{ height: captured.height, url: toDataUrl(captured.bytes, "image/jpeg"), width: captured.width }],
     };

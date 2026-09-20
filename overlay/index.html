@@ -28,6 +28,18 @@
   #bottom { display: grid; grid-template-columns: 350px 650px; }
   #splits { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
   #splitlist { flex: 1; overflow: hidden; }
+  #fan { padding: 4px 12px 10px; display: grid; gap: 5px; }
+  .ray { display: grid; grid-template-columns: 96px 1fr 44px; align-items: center; gap: 8px; font: 500 13px var(--mono); }
+  .ray b { font-weight: 500; color: var(--dim); }
+  .ray .bar { height: 10px; background: #18202b; border-radius: 2px; overflow: hidden; }
+  .ray .bar i { display: block; height: 100%; background: var(--green); }
+  .ray.near .bar i { background: var(--orange); }
+  .ray.blocked .bar i { background: var(--red); }
+  .ray span { text-align: right; color: var(--dim); }
+  #heardbox { flex: 1; overflow: hidden; padding: 6px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .heard { font: 500 14px/1.35 var(--sans); color: var(--text); border-left: 3px solid var(--sky); padding-left: 8px; }
+  .heard:nth-child(n+3) { color: var(--dim); opacity: .7; }
+  #objects { padding: 0 12px 6px; font: 400 12px var(--mono); color: var(--sky); }
   .split { display: flex; justify-content: space-between; padding: 0 10px 0 8px; height: 30.5px; align-items: center;
            font: 500 17px var(--mono); border-bottom: 1px solid #151b24; color: var(--text); }
   .split .t { color: var(--dim); }
@@ -89,7 +101,12 @@
   <section id="left">
     <div id="game"><div class="nosignal">waiting for game window…</div><img id="g1" alt=""><img id="g2" alt=""></div>
     <div id="bottom">
-      <div id="splits"><div id="splitlist"></div><div id="timer">0:00<small>.00</small></div></div>
+      <div id="splits">
+        <div class="label" style="padding:14px 12px 8px">Perception</div>
+        <div id="fan"></div>
+        <div id="heardbox"></div>
+        <div id="timer">0:00<small>.00</small></div>
+      </div>
       <div id="agentside">
         <div class="label">Agent view <span class="ago" id="viewago"></span></div>
         <div id="agentview"><img id="agentimg" alt=""></div>
@@ -104,7 +121,7 @@
 
   <section id="right">
     <div id="head">
-      <div><h1>FABLE 5.1 <span>PLAYS PORTAL</span></h1><div class="by">Anthropic · Claude Code</div></div>
+      <div><h1>FABLE 5.1 <span id="gametitle">PLAYS PORTAL 2</span></h1><div class="by">Anthropic · Claude Code</div></div>
       <div id="clock">0:00</div>
     </div>
     <div>
@@ -118,7 +135,7 @@
     </div>
     <div id="trace"><div class="label" style="margin-bottom:8px">Agent trace</div><div id="tracelist"></div></div>
     <div id="activity"><div class="label">Activity <span class="ago">last 45 min</span></div><div class="bars" id="bars"></div></div>
-    <div id="actions"><div class="label">Last actions <span class="ago" id="actago"></span></div><div id="actlist"></div></div>
+    <div id="actions"><div class="label">Journal <span class="ago" id="actago"></span></div><div id="actlist"></div></div>
   </section>
 </div>
 
@@ -191,15 +208,33 @@ function render() {
   const max = Math.max(1, ...S.activity);
   $("bars").innerHTML = S.activity.map((v) => `<i style="height:${v / max * 100}%"></i>`).join("");
 
-  $("actago").textContent = S.actions[0] ? ago(S.actions[0].at, now) : "";
-  $("actlist").innerHTML = S.actions.map((a) =>
-    `<div class="act${a.result.startsWith("error") ? " err" : ""}"><span class="a">${ago(a.at, now)}</span> <span class="n">portal exec</span> ${esc(a.code.replace(/\s+/g, " "))} <span class="r">→ ${esc(a.result)}</span></div>`).join("");
+  $("actago").textContent = S.journal?.[0] ? ago(S.journal[0].t * 1000, now) : "";
 
-  $("splitlist").innerHTML = S.splits.map((s) =>
-    `<div class="split${s.done ? " done" : ""}${s.current ? " current" : ""}"><span>${s.label}</span><span class="t">${s.splitAt != null ? fmtClock(s.splitAt) : "-"}</span></div>`).join("");
-  // Keep the current chamber in view once the run passes the visible rows.
-  const cur = document.querySelector(".split.current");
-  if (cur) $("splitlist").scrollTop = Math.max(0, cur.offsetTop - $("splitlist").offsetTop - 5 * 30.5);
+  if (S.game) $("gametitle").textContent = S.game === "portal" ? "PLAYS PORTAL" : "PLAYS PORTAL 2";
+
+  const fan = S.scene?.fan ?? {};
+  $("fan").innerHTML = Object.entries(fan).map(([dir, v]) => {
+    const cls = v > 0.55 ? "blocked" : v > 0.35 ? "near" : "";
+    return `<div class="ray ${cls}"><b>${dir.replace("_", " ")}</b><div class="bar"><i style="width:${Math.round(v * 100)}%"></i></div><span>${v.toFixed(2)}</span></div>`;
+  }).join("") + (S.scene?.objects?.length
+    ? `<div id="objects">${esc(S.scene.objects.join(" · "))}</div>` : "");
+
+  $("heardbox").innerHTML = (S.heard ?? []).map((h) => `<div class="heard">${esc(h)}</div>`).join("");
+
+  $("actlist").innerHTML = (S.journal ?? []).map((e) => {
+    const when = ago(e.t * 1000, now);
+    if (e.type === "error") return `<div class="act err"><span class="a">${when}</span> <span class="n">error</span> <span class="r">${esc(e.message ?? "")}</span></div>`;
+    const bits = [];
+    if (e.ticks !== undefined) bits.push(`ticks=${e.ticks}`);
+    if (e.moved !== undefined) bits.push(`moved=${e.moved}`);
+    if (e.scene) bits.push(e.scene);
+    if (e.heard?.length) bits.push("heard: " + e.heard.join(" | "));
+    if (!bits.length && e.returned) bits.push(e.returned);
+    return `<div class="act"><span class="a">${when}</span> <span class="n">exec</span> ${esc((e.code ?? "").replace(/\s+/g, " "))} <span class="r">→ ${esc(bits.join("  "))}</span></div>`;
+  }).join("");
+
+  const unusedSplits = S.splits.map((s) =>
+    `<div class="split${s.done ? " done" : ""}"><span>${s.label}</span></div>`).join("");
 
   $("viewago").textContent = ago(S.agentViewAt, now);
   if (S.agentViewAt && S.agentViewAt !== viewAt) {

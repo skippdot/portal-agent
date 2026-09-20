@@ -20,11 +20,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, v, i, a) => (v.startsWith("--") ? [...acc, [v.slice(2), a[i + 1]]] : acc), []),
 );
-const RUN_DIR = path.resolve(args["run-dir"] ?? path.join(os.homedir(), "Projects/portal-run"));
+const GAME = args.game ?? "portal2";
+const RUN_DIR = path.resolve(args["run-dir"] ?? path.join(os.homedir(), `Projects/${GAME === "portal" ? "portal-run" : "portal2-run"}`));
+const JOURNAL = path.join(RUN_DIR, "journal.jsonl");
 const DEMO_ROOT = args["demo-root"] ??
   path.join(os.homedir(), "Library/Application Support/CrossOver/Bottles/portal-1/drive_c/Games/Portal + Portal Prelude/portal/agent_runs");
 const PORT = Number(args.port ?? 8787);
-const CAPTURE_PORT = Number(args["capture-port"] ?? 27183);
+const CAPTURE_PORT = Number(args["capture-port"] ?? (GAME === "portal" ? 27183 : 27184));
 const GAME_W = 960, GAME_H = 600; // SPT backbuffer size, used for the client-area crop
 const TICKRATE = 66.666667;
 
@@ -212,6 +214,72 @@ function demoSeconds(file, bornAt) {
   return T.execTicks.filter((e) => e.at >= bornAt).reduce((sum, e) => sum + e.ticks, 0) / TICKRATE;
 }
 
+// --- Journal, scene and speech ----------------------------------------------
+
+let journalOffset = 0;
+const journalEntries = [];
+
+// The controller's own record of the run: objective, and independent of which
+// client is playing.
+function pollJournal() {
+  try {
+    const size = fs.statSync(JOURNAL).size;
+    if (size < journalOffset) journalOffset = 0;
+    if (size === journalOffset) return;
+    const fd = fs.openSync(JOURNAL, "r");
+    const buf = Buffer.alloc(size - journalOffset);
+    fs.readSync(fd, buf, 0, buf.length, journalOffset);
+    fs.closeSync(fd);
+    journalOffset = size;
+    for (const line of buf.toString("utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        journalEntries.push(JSON.parse(line));
+      } catch {}
+    }
+    journalEntries.splice(0, Math.max(0, journalEntries.length - 40));
+  } catch {}
+}
+
+function sidecar(line, expect) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port: CAPTURE_PORT });
+    const chunks = [];
+    socket.setTimeout(4000, () => socket.destroy(new Error("timeout")));
+    socket.on("connect", () => socket.write(line + "\n"));
+    socket.on("data", (c) => chunks.push(c));
+    socket.on("error", reject);
+    socket.on("end", () => {
+      const data = Buffer.concat(chunks);
+      const nl = data.indexOf(0x0a);
+      if (nl < 0) return reject(new Error("empty"));
+      const header = data.subarray(0, nl).toString().split(" ");
+      if (header[0] !== expect) return reject(new Error(header.join(" ")));
+      resolve({ header, body: data.subarray(nl + 1) });
+    });
+  });
+}
+
+let sceneOffset = 0;
+let scene = null;
+let heardOffset = 0;
+const heardLines = [];
+
+async function pollPerception() {
+  try {
+    const { header, body } = await sidecar(`SCENE ${sceneOffset}`, "SCENE");
+    sceneOffset = Number(header[1]);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    if (payload.scene && Object.keys(payload.scene).length) scene = payload.scene;
+  } catch {}
+  try {
+    const { header, body } = await sidecar(`HEARD ${heardOffset}`, "HEARD");
+    heardOffset = Number(header[1]);
+    for (const row of JSON.parse(body.toString("utf8") || "[]")) heardLines.push(row.text ?? String(row));
+    heardLines.splice(0, Math.max(0, heardLines.length - 12));
+  } catch {}
+}
+
 // --- State ------------------------------------------------------------------
 
 function snapshot() {
@@ -231,7 +299,12 @@ function snapshot() {
     const ago = Math.floor((now - t) / 60000);
     if (ago >= 0 && ago < 45) bins[44 - ago]++;
   }
-  const { splits, gameSeconds } = readSplits();
+  pollJournal();
+  // Portal keeps in-game time in its demo files; Portal 2 has no demos here,
+  // so the ticks the controller actually played are summed instead.
+  const { splits, gameSeconds: demoSeconds } = readSplits();
+  const journalTicks = journalEntries.reduce((sum, e) => sum + (Number(e.ticks) || 0), 0);
+  const gameSeconds = GAME === "portal" ? demoSeconds : journalTicks / 60;
   return {
     now,
     startedAt: T.startedAt,
@@ -245,6 +318,13 @@ function snapshot() {
     actions: T.actions.slice(-6).reverse(),
     agentViewAt: T.agentViewAt,
     activity: bins,
+    game: GAME,
+    scene,
+    heard: heardLines.slice(-6).reverse(),
+    journal: journalEntries.slice(-12).reverse().map((e) => ({
+      t: e.t, type: e.type, code: e.code, ticks: e.ticks, moved: e.moved,
+      heard: e.heard, scene: e.scene, message: e.message, returned: e.returned,
+    })),
     splits: splits.map((s) => ({ ...s, splitAt: s.splitAt && T.startedAt ? s.splitAt - T.startedAt : null })),
   };
 }
@@ -280,6 +360,7 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(html());
     } else if (url.pathname === "/state.json") {
       pollTranscript();
+      await pollPerception();
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(snapshot()));
     } else if (url.pathname === "/agent.jpg") {
       if (!T.agentView) return res.writeHead(404).end();

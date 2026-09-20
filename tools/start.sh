@@ -30,6 +30,7 @@ ASR_PYTHON="${ASR_PYTHON:-$HOME/Projects/asr-ru-перенос/код/.venv/bin/
 VISION_PYTHON="${VISION_PYTHON:-$LOCAL/venv-vision/bin/python}"
 
 stop_all() {
+  pkill -f "tools/start.sh" 2>/dev/null || true   # the keep-alive loops
   pkill -f "$ROOT/.local/bin/game-tap" 2>/dev/null || true
   pkill -f "tools/asr-daemon.py" 2>/dev/null || true
   pkill -f "tools/vision-daemon.py" 2>/dev/null || true
@@ -64,13 +65,21 @@ HEARD="$LOCAL/heard-$GAME.jsonl"
 SCENE="$LOCAL/scene-$GAME.jsonl"
 mkdir -p "$REC" "$FRAMES"
 
+# The capture stream dies when the game window is recreated (resolution change,
+# game restart), and a dead stream stops the agent, so it is kept alive here.
 if [ "$AUDIO" = 1 ] && [ -x "$ASR_PYTHON" ]; then
-  "$LOCAL/bin/game-tap" --app "$APP" --record "$REC" --frames "$FRAMES" \
-      --audio-raw "$LOCAL/audio-$GAME.f32" --fps 10 --segment 10 2>>"$LOCAL/tap.log" \
-    | "$ASR_PYTHON" tools/asr-daemon.py --out "$HEARD" >>"$LOCAL/asr.log" 2>&1 &
+  ( while true; do
+      "$LOCAL/bin/game-tap" --app "$APP" --record "$REC" --frames "$FRAMES" \
+          --audio-raw "$LOCAL/audio-$GAME.f32" --fps 10 --segment 10 2>>"$LOCAL/tap.log" \
+        | "$ASR_PYTHON" tools/asr-daemon.py --out "$HEARD" >>"$LOCAL/asr.log" 2>&1
+      sleep 3
+    done ) &
 else
-  "$LOCAL/bin/game-tap" --app "$APP" --record "$REC" --frames "$FRAMES" \
-      --fps 10 --segment 10 --no-audio >/dev/null 2>>"$LOCAL/tap.log" &
+  ( while true; do
+      "$LOCAL/bin/game-tap" --app "$APP" --record "$REC" --frames "$FRAMES" \
+          --fps 10 --segment 10 --no-audio >/dev/null 2>>"$LOCAL/tap.log"
+      sleep 3
+    done ) &
 fi
 
 if [ -x "$VISION_PYTHON" ]; then
